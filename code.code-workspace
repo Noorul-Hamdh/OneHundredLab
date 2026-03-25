@@ -1,0 +1,18 @@
+{
+	"folders": [
+		{
+			"path": "../repo/code"
+		},
+		{
+			"path": "../../../../../Code"
+		}
+	],
+	"settings": {},
+	"launch": {
+		"version": "0.2.0",
+		"configurations": [
+			
+
+		]
+	}
+}
