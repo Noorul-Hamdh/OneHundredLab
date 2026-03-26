@@ -27,19 +27,20 @@ export default function Chat({ dark, setDark }) {
       Format the response clearly with each day labeled, breakfast, lunch, dinner and snacks. Include estimated calories per meal. End with a brief nutrition tip.`
 
           try {
-            const res = await fetch('http://127.0.0.1:54321/functions/v1/generate-plan', {
+            const res = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-001:generateContent?key=${import.meta.env.VITE_GEMINI_API_KEY}`,
+            {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json',
-                'Authorization': 'Bearer sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH'
-              },
-              body: JSON.stringify({ prompt })
-            })
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+            }
+          )
 
             const data = await res.json()
             console.log('API response:', data)
 
             if (data.error) {
-              setPlan('API Error: ' + data.error)
+              setPlan(data.text)
               setLoading(false)
               return
             }
