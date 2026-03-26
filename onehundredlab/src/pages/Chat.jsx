@@ -28,7 +28,7 @@ export default function Chat({ dark, setDark }) {
 
           try {
             const res = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-001:generateContent?key=${import.meta.env.VITE_GEMINI_API_KEY}`,
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${import.meta.env.VITE_GEMINI_API_KEY}`,
             {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -40,12 +40,12 @@ export default function Chat({ dark, setDark }) {
             console.log('API response:', data)
 
             if (data.error) {
-              setPlan(data.text)
-              setLoading(false)
-              return
-            }
+  setPlan('API Error: ' + data.error.message)
+  setLoading(false)
+  return
+}
 
-            setPlan(data.text)
+setPlan(data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response')
 
           } catch (err) {
             console.error('Full error:', err)
