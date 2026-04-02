@@ -1,11 +1,31 @@
+import { supabase } from '../lib/supabase'
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import ReactMarkdown from 'react-markdown'
+import jsPDF from 'jspdf'
 import Navbar from '../components/Navbar'
 import Footer from '../components/Footer'
 
-export default function Chat({ dark, setDark }) {
-  const [step, setStep] = useState('form') // 'form' or 'chat'
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${import.meta.env.VITE_GEMINI_API_KEY}`
+
+async function askGemini(messages) {
+  const res = await fetch(GEMINI_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ contents: messages })
+  })
+  const data = await res.json()
+  if (data.error) throw new Error(data.error.message)
+  return data.candidates[0].content.parts[0].text
+}
+
+export default function Chat({ dark, setDark, user }) {
+  const navigate = useNavigate()
+  const [step, setStep] = useState('form')
   const [loading, setLoading] = useState(false)
-  const [plan, setPlan] = useState('')
+  const [downloading, setDownloading] = useState(false)
+  const [messages, setMessages] = useState([])
+  const [input, setInput] = useState('')
   const [form, setForm] = useState({
     age: '', weight: '', height: '', goal: '', activity: '', diet: '', health: ''
   })
@@ -13,54 +33,115 @@ export default function Chat({ dark, setDark }) {
   const handleChange = (e) => setForm({ ...form, [e.target.name]: e.target.value })
 
   const generatePlan = async () => {
-          setLoading(true)
-          setStep('chat')
-          const prompt = `You are a professional nutritionist. Generate a detailed, personalized 7-day meal plan for the following person:
-      - Age: ${form.age}
-      - Weight: ${form.weight}kg
-      - Height: ${form.height}cm
-      - Goal: ${form.goal}
-      - Activity Level: ${form.activity}
-      - Dietary Restrictions: ${form.diet || 'None'}
-      - Health Conditions: ${form.health || 'None'}
+    if (!user) { navigate('/login'); return }
+    setLoading(true)
+    setStep('chat')
+    const prompt = `You are a professional nutritionist. Generate a detailed, personalized 7-day meal plan for the following person:
+- Age: ${form.age}
+- Weight: ${form.weight}kg
+- Height: ${form.height}cm
+- Goal: ${form.goal}
+- Activity Level: ${form.activity}
+- Dietary Restrictions: ${form.diet || 'None'}
+- Health Conditions: ${form.health || 'None'}
 
-      Format the response clearly with each day labeled, breakfast, lunch, dinner and snacks. Include estimated calories per meal. End with a brief nutrition tip.`
+Format the response clearly with each day labeled, breakfast, lunch, dinner and snacks. Include estimated calories per meal. End with a brief nutrition tip.`
 
-          try {
-            const res = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${import.meta.env.VITE_GEMINI_API_KEY}`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-            }
-          )
+    try {
+      const reply = await askGemini([{ role: 'user', parts: [{ text: prompt }] }])
+      setMessages([
+        { role: 'user', parts: [{ text: prompt }] },
+        { role: 'model', parts: [{ text: reply }] }
+      ])
 
-            const data = await res.json()
-            console.log('API response:', data)
+      await supabase.from('diet_plans').insert({
+        user_id: user.id,
+        plan_text: reply,
+        goal: form.goal
+      })
 
-            if (data.error) {
-  setPlan('API Error: ' + data.error.message)
-  setLoading(false)
-  return
-}
+    } catch (err) {
+      setMessages([{ role: 'model', parts: [{ text: 'Error: ' + err.message }] }])
+    }
+    setLoading(false)
+  }
 
-setPlan(data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response')
+  const sendMessage = async () => {
+    if (!input.trim()) return
+    const newMessages = [...messages, { role: 'user', parts: [{ text: input }] }]
+    setMessages(newMessages)
+    setInput('')
+    setLoading(true)
+    try {
+      const reply = await askGemini(newMessages)
+      setMessages([...newMessages, { role: 'model', parts: [{ text: reply }] }])
+    } catch (err) {
+      setMessages([...newMessages, { role: 'model', parts: [{ text: 'Error: ' + err.message }] }])
+    }
+    setLoading(false)
+  }
 
-          } catch (err) {
-            console.error('Full error:', err)
-            setPlan('Error: ' + err.message)
-          }
+  const downloadPDF = () => {
+    setDownloading(true)
+    try {
+      const allModelMsgs = messages.filter(m => m.role === 'model')
+      const planText = allModelMsgs[allModelMsgs.length - 1]?.parts[0].text || ''
+      const pdf = new jsPDF('p', 'mm', 'a4')
+      const pageWidth = pdf.internal.pageSize.getWidth()
+      const pageHeight = pdf.internal.pageSize.getHeight()
+      const margin = 15
+      const maxWidth = pageWidth - margin * 2
+      let y = 20
 
-          setLoading(false)
+      pdf.setFillColor(146, 64, 14)
+      pdf.rect(0, 0, pageWidth, 14, 'F')
+      pdf.setTextColor(255, 255, 255)
+      pdf.setFontSize(10)
+      pdf.setFont('helvetica', 'bold')
+      pdf.text('ONEHUNDREDLABS — YOUR PERSONAL DIET PLAN', margin, 9)
+      y = 24
+
+      const lines = planText.split('\n')
+      for (const line of lines) {
+        const clean = line
+          .replace(/\*\*(.+?)\*\*/g, '$1')
+          .replace(/\*(.+?)\*/g, '$1')
+          .replace(/^#{1,3} /, '')
+          .replace(/^[\*\-] /, '• ')
+
+        if (clean.trim() === '' || clean.trim() === '---') { y += 4; continue }
+
+        const isHeading = line.startsWith('#')
+        const isBold = line.startsWith('**') || line.startsWith('###')
+
+        pdf.setTextColor(30, 20, 10)
+        if (isHeading) { pdf.setFontSize(13); pdf.setFont('helvetica', 'bold') }
+        else if (isBold) { pdf.setFontSize(10); pdf.setFont('helvetica', 'bold') }
+        else { pdf.setFontSize(9.5); pdf.setFont('helvetica', 'normal') }
+
+        const wrapped = pdf.splitTextToSize(clean, maxWidth)
+        for (const wline of wrapped) {
+          if (y > pageHeight - 15) { pdf.addPage(); y = 15 }
+          pdf.text(wline, margin, y)
+          y += isHeading ? 7 : 5.5
         }
+      }
+
+      pdf.setFontSize(8)
+      pdf.setTextColor(180, 120, 60)
+      pdf.text('Generated by OneHundredLabs — onehundredlabs.com', margin, pageHeight - 8)
+      pdf.save('OneHundredLabs-Diet-Plan.pdf')
+    } catch (err) {
+      console.error('PDF error:', err)
+    }
+    setDownloading(false)
+  }
 
   return (
     <div className="bg-[#FAF7F2] dark:bg-zinc-950 min-h-screen transition-colors duration-500">
-      <Navbar dark={dark} setDark={setDark} />
+      <Navbar dark={dark} setDark={setDark} user={user} />
 
       <div className="pt-28 pb-20 px-6 max-w-3xl mx-auto">
-
         {step === 'form' && (
           <>
             <div className="text-center mb-12">
@@ -135,25 +216,72 @@ setPlan(data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response')
           <>
             <div className="text-center mb-10">
               <h1 style={{fontFamily:'Cormorant Garamond,serif'}} className="text-5xl font-black text-zinc-900 dark:text-white">Your Diet Plan</h1>
-              <p className="text-zinc-400 dark:text-zinc-500 mt-2 text-sm">Personalized just for you</p>
+              <p className="text-zinc-400 dark:text-zinc-500 mt-2 text-sm">Ask followup questions below</p>
             </div>
 
-            <div className="bg-white dark:bg-zinc-900 rounded-3xl p-8 border border-stone-100 dark:border-zinc-800">
-              {loading ? (
-                <div className="flex flex-col items-center justify-center py-16 gap-4">
+            <div className="space-y-4 mb-4">
+              {messages.filter(m => m.role === 'model').length === 0 && loading && (
+                <div className="bg-white dark:bg-zinc-900 rounded-3xl p-8 border border-stone-100 dark:border-zinc-800 flex flex-col items-center justify-center py-16 gap-4">
                   <div className="w-8 h-8 border-2 border-amber-700 dark:border-yellow-400 border-t-transparent rounded-full animate-spin" />
                   <p className="text-zinc-400 dark:text-zinc-500 text-sm tracking-widest uppercase">Crafting your plan...</p>
                 </div>
-              ) : (
-                <pre className="whitespace-pre-wrap text-zinc-700 dark:text-zinc-300 text-sm leading-relaxed" style={{fontFamily:'DM Sans, sans-serif', userSelect:'text', cursor:'text'}}>
-                  {plan}
-                </pre>
+              )}
+
+              {messages.map((msg, i) => (
+                msg.role === 'model' ? (
+                  <div key={i} className="bg-white dark:bg-zinc-900 rounded-3xl p-8 border border-stone-100 dark:border-zinc-800">
+                    <div className="prose prose-sm max-w-none text-zinc-700 dark:text-zinc-300" style={{userSelect:'text', cursor:'text'}}>
+                      <ReactMarkdown>{msg.parts[0].text}</ReactMarkdown>
+                    </div>
+                  </div>
+                ) : i > 0 ? (
+                  <div key={i} className="flex justify-end">
+                    <div className="bg-amber-700 dark:bg-yellow-400 text-white dark:text-black rounded-2xl px-5 py-3 text-sm max-w-xs">
+                      {msg.parts[0].text}
+                    </div>
+                  </div>
+                ) : null
+              ))}
+
+              {loading && messages.length > 0 && (
+                <div className="flex items-center gap-3 text-zinc-400 dark:text-zinc-500 text-sm px-2">
+                  <div className="w-5 h-5 border-2 border-amber-700 dark:border-yellow-400 border-t-transparent rounded-full animate-spin" />
+                  Thinking...
+                </div>
               )}
             </div>
 
+            {messages.filter(m => m.role === 'model').length > 0 && !loading && (
+              <button
+                onClick={downloadPDF}
+                disabled={downloading}
+                className="w-full bg-white dark:bg-zinc-900 border border-stone-200 dark:border-zinc-700 text-amber-700 dark:text-yellow-400 py-3 rounded-2xl text-sm font-medium tracking-widest uppercase hover:border-amber-700 dark:hover:border-yellow-400 transition-all mb-4 disabled:opacity-50"
+              >
+                {downloading ? 'Preparing PDF...' : '↓ Download Diet Plan as PDF'}
+              </button>
+            )}
+
+            <div className="flex gap-3 items-center bg-white dark:bg-zinc-900 rounded-2xl px-5 py-3 border border-stone-100 dark:border-zinc-800">
+              <input
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && sendMessage()}
+                placeholder="Ask a followup question..."
+                className="flex-1 bg-transparent text-zinc-900 dark:text-white text-sm focus:outline-none"
+                style={{userSelect:'text', cursor:'text'}}
+              />
+              <button
+                onClick={sendMessage}
+                disabled={loading || !input.trim()}
+                className="bg-amber-700 dark:bg-yellow-400 text-white dark:text-black px-5 py-2 rounded-xl text-sm font-medium hover:bg-amber-800 dark:hover:bg-yellow-300 transition-all disabled:opacity-40"
+              >
+                Send
+              </button>
+            </div>
+
             <button
-              onClick={() => { setStep('form'); setPlan('') }}
-              className="mt-6 w-full border border-amber-700/40 dark:border-yellow-400/40 text-amber-700 dark:text-yellow-400 py-4 rounded-full font-medium text-sm tracking-widest uppercase hover:border-amber-700 dark:hover:border-yellow-400 transition-all"
+              onClick={() => { setStep('form'); setMessages([]) }}
+              className="mt-4 w-full border border-amber-700/40 dark:border-yellow-400/40 text-amber-700 dark:text-yellow-400 py-4 rounded-full font-medium text-sm tracking-widest uppercase hover:border-amber-700 dark:hover:border-yellow-400 transition-all"
             >
               ← Generate Another Plan
             </button>

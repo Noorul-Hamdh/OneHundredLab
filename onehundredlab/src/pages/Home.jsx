@@ -26,7 +26,7 @@ function useReveal() {
   return ref
 }
 
-export default function Home({ dark, setDark }) {
+export default function Home({ dark, setDark, user }) {
   const expertiseTitleRef = useReveal()
   const card1Ref = useReveal()
   const card2Ref = useReveal()
@@ -40,9 +40,8 @@ export default function Home({ dark, setDark }) {
 
   return (
     <div className="bg-[#FAF7F2] dark:bg-zinc-950 min-h-screen transition-colors duration-500">
-      <Navbar dark={dark} setDark={setDark} />
+      <Navbar dark={dark} setDark={setDark} user={user} />
 
-      {/* Hero */}
       <section className="min-h-screen flex flex-col items-center justify-center text-center px-6 relative overflow-hidden">
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_#f5e6c8_0%,_transparent_60%)] dark:bg-[radial-gradient(ellipse_at_top,_#2a1f0a_0%,_transparent_60%)] pointer-events-none" />
 
@@ -60,7 +59,7 @@ export default function Home({ dark, setDark }) {
         </p>
 
         <div className="mt-10 flex flex-col sm:flex-row gap-4 z-10">
-          <Link to="/chat" className="bg-amber-700 dark:bg-yellow-400 text-white dark:text-black px-8 py-4 font-medium text-sm tracking-widest uppercase rounded-full hover:bg-amber-800 dark:hover:bg-yellow-300 transition-all shadow-lg">
+          <Link to={user ? '/chat' : '/login'} className="bg-amber-700 dark:bg-yellow-400 text-white dark:text-black px-8 py-4 font-medium text-sm tracking-widest uppercase rounded-full hover:bg-amber-800 dark:hover:bg-yellow-300 transition-all shadow-lg">
             Get My Diet Plan →
           </Link>
           <Link to="/appointment" className="border border-amber-700/40 dark:border-yellow-400/40 text-amber-700 dark:text-yellow-400 px-8 py-4 font-medium text-sm tracking-widest uppercase rounded-full hover:border-amber-700 dark:hover:border-yellow-400 transition-all">
@@ -78,7 +77,6 @@ export default function Home({ dark, setDark }) {
         </div>
       </section>
 
-      {/* Expertise Section */}
       <section className="min-h-screen flex flex-col items-center justify-center py-12 px-6">
         <div ref={expertiseTitleRef} style={hiddenStyle} className="text-center">
           <h2 style={{fontFamily:'Cormorant Garamond, serif'}} className="text-5xl font-black text-zinc-900 dark:text-white">Our Expertise</h2>
